@@ -53,7 +53,7 @@ class LongformerConfig(RobertaConfig):
 
 
 class LongformerSelfAttention(nn.Module):
-    def __init__(self, dim_emb: int, nb_heads: int, layer_id: int, dropout: float=0.):
+    def __init__(self, dim_emb: int, nb_heads: int, attention_window: int, dropout: float=0.):
         super(LongformerSelfAttention, self).__init__()
         if dim_emb % nb_heads != 0:
             raise ValueError(
@@ -72,10 +72,9 @@ class LongformerSelfAttention(nn.Module):
         self.value_global = nn.Linear(self.embed_dim, self.embed_dim)
 
         self.dropout = dropout
+        self.attention_window = attention_window
 
-        self.layer_id = layer_id
         # TODO change fixed params here
-        self.attention_window = 32
         self.attention_dilation = 1
         self.attention_mode = 'sliding_chunks'
         self.autoregressive = False
