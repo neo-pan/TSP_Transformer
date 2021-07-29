@@ -150,6 +150,44 @@ def pad_to_window_size_3d(hidden_state: torch.Tensor, attention_mask: torch.Tens
     attention_mask = F.pad(attention_mask, (0, padding_len), value=-1)  # no attention on the padding tokens
     return hidden_state, attention_mask
 
+def circular_pad_seq(seq: torch.Tensor, one_sided_window_size: int, pad_value: float=0):
+    original_size = seq.size()
+    w = int(2 * one_sided_window_size)
+    assert seq.dim() == 3 or seq.dim() == 4 # (bsz, seqlen, embed_dim) or (bsz, seqlen, num_heads, head_dim)
+    bsz = seq.size(0)
+    seqlen = seq.size(1)
+
+    # circular pad for tsp sequence
+    seq = seq.view(bsz, seqlen, -1)
+
+    # When using the CUDA backend, `pad` operation may induce nondeterministic behaviour in its backward pass
+    # so use manual concatenate instead
+    # seq = F.pad(seq, (0, 0, one_sided_window_size, one_sided_window_size), mode="circular")
+    seq = torch.cat([seq[:, -one_sided_window_size:, ...], seq, seq[:, :one_sided_window_size, ...]], dim=1)
+
+    seqlen = seq.size(1)
+    padding_len = (w - seqlen % w) % w
+    # zero pad for window_size
+    seq = F.pad(seq, (0, 0, 0, padding_len), value=pad_value)
+ 
+    # restore seq shape
+    seqlen = seq.size(1)
+    seq = seq.view(bsz, seqlen, *original_size[-2:])
+
+    return seq
+
+def circular_pad_mask(attention_mask: torch.Tensor, one_sided_window_size: int):
+    w = int(2 * one_sided_window_size)
+    assert attention_mask.dim() == 2 # (bsz, seqlen)
+    # mask circular padded nodes as local attention
+    attention_mask = F.pad(attention_mask, (one_sided_window_size, one_sided_window_size), value=0)
+    seqlen = attention_mask.size(1)
+    padding_len = (w - seqlen % w) % w
+    # mask extra padded nodes as no attention
+    seq = F.pad(attention_mask, (0, padding_len), value=-1)
+
+    return seq
+
 # ========= "sliding_chunks_no_overlap": alternative implemenation of the sliding window attention =========
 # This implementation uses non-overlapping chunks (or blocks) of size `w` with number of local attention = 3xw
 # To make this implemenation comparable to "sliding_chunks" set w such that
