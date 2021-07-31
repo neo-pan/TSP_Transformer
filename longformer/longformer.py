@@ -3,6 +3,7 @@ import math
 import torch
 from torch import nn
 import torch.nn.functional as F
+from torch.nn.init import xavier_uniform_, constant_
 from longformer.diagonaled_mm_tvm import diagonaled_mm as diagonaled_mm_tvm, mask_invalid_locations
 from longformer.sliding_chunks import circular_pad_seq, circular_pad_mask, sliding_chunks_matmul_qk, sliding_chunks_matmul_pv
 from longformer.sliding_chunks import sliding_chunks_no_overlap_matmul_qk, sliding_chunks_no_overlap_matmul_pv
@@ -26,6 +27,8 @@ class LongformerSelfAttention(nn.Module):
         self.key_global = nn.Linear(self.embed_dim, self.embed_dim)
         self.value_global = nn.Linear(self.embed_dim, self.embed_dim)
 
+        self.out = nn.Linear(self.embed_dim, self.embed_dim)
+
         self.dropout = dropout
         self.attention_window = attention_window
 
@@ -39,7 +42,20 @@ class LongformerSelfAttention(nn.Module):
         if self.attention_mode in ['sliding_chunks', 'sliding_chunks_no_overlap']:
             assert not self.autoregressive  # not supported
             assert self.attention_dilation == 1  # dilation is not supported
+        self._reset_parameters()
 
+    def _reset_parameters(self):
+        linear_layers = [
+            self.query, self.query_global,
+            self.key, self.key_global, 
+            self.value, self.value_global, 
+            self.out
+        ]
+        
+        for l in linear_layers:
+            xavier_uniform_(l.weight)
+            constant_(l.bias, 0)
+    
     def forward(
         self,
         hidden_states,
@@ -106,7 +122,7 @@ class LongformerSelfAttention(nn.Module):
         k = k.view(seq_len, bsz, self.num_heads, self.head_dim).transpose(0, 1)
 
         circular_q = circular_pad_seq(q, self.attention_window, 0)
-        circular_k = circular_pad_seq(q, self.attention_window, 0)
+        circular_k = circular_pad_seq(k, self.attention_window, 0)
         circular_seq_len = circular_q.size(1)
         # attn_weights = (bsz, seq_len, num_heads, window*2+1)
         if self.attention_mode == 'tvm':
@@ -234,6 +250,7 @@ class LongformerSelfAttention(nn.Module):
             attn[extra_attention_mask_nonzeros[::-1]] = nonzero_selected_attn.view(len(selection_padding_mask_nonzeros[0]), -1).type_as(hidden_states)
 
         context_layer = attn.transpose(0, 1)
+        context_layer = self.out(context_layer)
         if output_attentions:
             if extra_attention_mask is not None:
                 # With global attention, return global attention probabilities only
