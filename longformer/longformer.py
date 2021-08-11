@@ -126,10 +126,9 @@ class LongformerSelfAttention(nn.Module):
         circular_seq_len = circular_q.size(1)
         # attn_weights = (bsz, seq_len, num_heads, window*2+1)
         if self.attention_mode == 'tvm':
-            raise NotImplementedError
-            q = q.float().contiguous()
-            k = k.float().contiguous()
-            attn_weights = diagonaled_mm_tvm(q, k, self.attention_window, self.attention_dilation, False, 0, False)
+            circular_q = circular_q.float().contiguous()
+            circular_k = circular_k.float().contiguous()
+            attn_weights = diagonaled_mm_tvm(circular_q, circular_k, self.attention_window, self.attention_dilation, False, 0, False)
         elif self.attention_mode == "sliding_chunks":
             # attn_weights.shape (bsz, num_heads, seqlen, 2 * w + 1)
             circular_attn_weights = sliding_chunks_matmul_qk(circular_q, circular_k, self.attention_window, padding_value=0)
@@ -198,9 +197,10 @@ class LongformerSelfAttention(nn.Module):
         circular_attn_probs = circular_pad_seq(attn_probs, self.attention_window, 0)
 
         if self.attention_mode == 'tvm':
-            raise NotImplementedError
-            v = v.float().contiguous()
-            attn += diagonaled_mm_tvm(attn_probs, v, self.attention_window, self.attention_dilation, True, 0, False)
+            circular_v = circular_v.float().contiguous()
+            circular_attn_probs = circular_attn_probs.float().contiguous()
+            circular_attn = diagonaled_mm_tvm(circular_attn_probs, circular_v, self.attention_window, self.attention_dilation, True, 0, False)
+            attn += circular_attn[:, self.attention_window: self.attention_window+seq_len, ...]
         elif self.attention_mode == "sliding_chunks":
             # (bsz, circular_seq_len, num_heads, head_dim)
             circular_attn= sliding_chunks_matmul_pv(circular_attn_probs, circular_v, self.attention_window)
